@@ -1,0 +1,1718 @@
+---
+title: "Análisis de la intención de voto en Buenos Aires y Córdoba para las elecciones generales del año 2015"
+subtitle: "Trabajo final de la materia Investigación Electoral y de Opinión Pública Aplicada I y II"
+author: "Bardauil Ariana"
+date: "`r Sys.Date()`"
+lang: "es"
+output:
+  rmdformats::downcute:
+    lightbox: TRUE
+    highlight: pygments
+    toc: 4
+    number-sections: TRUE
+    code_download: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE, message=FALSE, error = FALSE)
+library(haven)
+library(readr)
+library(janitor)
+library(tidyverse)
+library(gt)
+library(gridExtra)
+library(grid)
+library(stringr)
+library(RColorBrewer)
+library(mice)
+library(readxl)
+library(kableExtra)
+library(anesrake)
+library(scales)
+library(lmtest)
+library(factoextra)
+```
+
+# Introducción
+
+El **objetivo** de este trabajo es analizar la intención de voto de dos encuestas realizadas en Buenos Aires y Córdoba realizada de las Primarias Abiertas Simultaneas y Obligatorias (PASO) del 9 de agosto del 2015 para la materia **Investigación Electoral y de Opinión Pública Aplicada I y II.** El resultado de las PASO fue el siguiente:
+
+```{r}
+read_excel("Consigna y materiales TP1/Materiales de referencia/Resultados PASO2015.xlsx", 
+    sheet = "Hoja2") |> 
+  mutate(`Buenos Aires` = paste0(round(`Buenos Aires`*100, 2), "%"),
+         `Córdoba` = paste0(round(`Córdoba`*100, 2), "%")) |> 
+  kable(format = "html", escape = FALSE) |> 
+  kable_styling(bootstrap_options = "striped", font_size = 14)
+```
+
+El 25 de octubre (Primera vuelta) y el 22 de noviembre (segunda vuelta) de 2015 se sucedieron las **elecciones presidenciales de Argentina**. Los **principales candidatos** fueron **Daniel Scioli** del Frente para la Victoria (FpV), candidato oficialista, y **Mauricio Macri** de Cambiemos, entonces jefe de gobierno de la Ciudad de Buenos Aires.
+
+![](image-removebg-preview.png)
+
+En la primera vuelta electoral, que tuvo lugar el 25 de octubre de 2015, ninguno de los candidatos obtuvo más del 45% de los votos ni una diferencia de más de 10 puntos porcentuales sobre el segundo candidato, lo que llevó a la realización de una segunda vuelta electoral.
+
+-   Daniel Scioli (FpV): 37.08% de los votos.
+
+-   Mauricio Macri (Cambiemos): 34.15% de los votos.
+
+Daniel Scioli y Mauricio Macri, se enfrentaron en una segunda vuelta electoral el 22 de noviembre de 2015 lo que llevó al segundo a la victoria con el 51.34% de los votos.
+
+## Consigna
+
+Sobre la base de los materiales entregados (Cuestionario y Bases de Resultados de los Estudios Electorales de Córdoba Capital y Base Individuos EPH)
+
+1- Procesar las bases de datos de manera independiente aplicando el método de ponderación iterativa visto en clase (Parámetros en Base EPH).
+
+2- En base a los indicadores relevados evaluar el potencial electoral de los principales candidatos a Presidente (Macri y Scioli)
+
+3- Seleccionar un conjunto de indicadores que den cuenta de al menos dos de las perspectivas teóricas vistas en la bibliografía sobre comportamiento electoral y evaluar el impacto de dichos indicadores en la decisión de voto utilizando al menos dos herramientas de análisis. Comparar los resultados obtenidos entre ambas ciudades.
+
+```{r}
+CORDOBA <- read_sav("Consigna y materiales TP1/Bases de datos/CORDOBA_FINAL.sav")
+GBA <- read_sav("Consigna y materiales TP1/Bases de datos/GBA_FINAL.sav")
+```
+
+```{r include=FALSE}
+
+# Modifico las etiquetas 
+CORDOBA <- CORDOBA |> 
+  mutate(UA = as.numeric(UA),
+  EDAD = factor(EDAD,
+                levels = c(1:4), 
+                labels = c("18-29","30-49","50-65",">65"), 
+                ordered = T),
+  SEXO = factor(SEXO,
+                levels = c(1:2),
+                labels = c("Varón","Mujer"), 
+                ordered = T),
+  NIV_EDUCATIVO = factor( NIV_EDUCATIVO,
+                          levels = (1:5),
+                          labels = c("Primario completo",
+                                     "Secundario incompleto o completo",
+                                     "Terciario no univ. incompleto",
+                                     "Terciario no univ. completo",
+                                     "Universitario incompleto o completo"),
+                          ordered = T),
+  VOTO_CANDIDATO = case_when(
+    VOTO_CANDIDATO == 1 ~ "Daniel Scioli",
+    VOTO_CANDIDATO == 2 ~ "Mauricio Macri",
+    VOTO_CANDIDATO == 3 ~ "Sergio Massa",
+    VOTO_CANDIDATO == 4 ~ "Margarita Stolbizer",
+    VOTO_CANDIDATO == 5 ~ "Nicolas Del Caño",
+    VOTO_CANDIDATO == 6 ~ "Adolfo Rodriguez Saa",
+    VOTO_CANDIDATO == 8 ~ "Ninguno / En Blanco",
+    VOTO_CANDIDATO == 9 ~ "No Sabe"),
+  VOTO_ACOTADO = case_when(
+    VOTO_ACOTADO == 1 ~ "Daniel Scioli",
+    VOTO_ACOTADO == 2 ~ "Mauricio Macri",
+    VOTO_ACOTADO == 3 ~ "Sergio Massa",
+    VOTO_ACOTADO == 8 ~ "Ninguno / En Blanco",
+    VOTO_ACOTADO == 9 ~ "No Sabe"),
+  JAMAS_VOTARIA = case_when(
+    JAMAS_VOTARIA == 1 ~ "Daniel Scioli",
+    JAMAS_VOTARIA == 2 ~ "Mauricio Macri",
+    JAMAS_VOTARIA == 3 ~ "Sergio Massa",
+    JAMAS_VOTARIA == 8 ~ "Ninguno / En Blanco",
+    JAMAS_VOTARIA == 9 ~ "No Sabe"),
+  GESTION_CRISTINA = factor(GESTION_CRISTINA,
+                            levels = c(1,2,9),
+                            labels = c("Desaprueba","Aprueba","No sabe"),
+                            ordered = T),
+  ECONOMIA_PAIS_2_AÑOS = factor(ECONOMIA_PAIS_2_AÑOS,
+                                levels = c(1:3,9),
+                                labels = c("Mejoró","Empeoró","Se mantuvo igual","No sabe"),
+                                ordered = T),
+  ECONOMIA_FLIAR_2_AÑOS = factor(ECONOMIA_FLIAR_2_AÑOS,
+                                levels = c(1:3,9),
+                                labels = c("Mejoró","Empeoró","Se mantuvo igual","No sabe"),
+                                ordered = T),
+  CONTINUIDAD_O_CAMBIO = factor(CONTINUIDAD_O_CAMBIO,
+                                levels = c(1:3,9),
+                                labels = c("Mantener políticas actuales","Mantener algunas y cambiar otras","Cambiar todas","No sabe"),
+                                ordered = T),
+  REPRESENTACION_DEL_CAMBIO = case_when(
+    REPRESENTACION_DEL_CAMBIO == 1 ~ "Sergio Massa",
+    REPRESENTACION_DEL_CAMBIO == 2 ~ "Mauricio Macri",
+    REPRESENTACION_DEL_CAMBIO == 3 ~ "Daniel Scioli",
+    REPRESENTACION_DEL_CAMBIO == 8 ~ "Ninguno",
+    REPRESENTACION_DEL_CAMBIO == 9 ~ "No sabe"),
+  AGENDA_DE_TEMAS = case_when(
+    AGENDA_DE_TEMAS == 1 ~ "Seguridad",
+    AGENDA_DE_TEMAS == 2 ~ "Economía",
+    AGENDA_DE_TEMAS == 3 ~ "Respeto de instituciones",
+    AGENDA_DE_TEMAS == 4 ~ "Educacion, asistencia social, salud",
+    AGENDA_DE_TEMAS == 5 ~ "Empleo",
+    AGENDA_DE_TEMAS == 9 ~ "No sabe"
+  ),
+  PERCEPCION_DE_GANADOR = case_when(
+    PERCEPCION_DE_GANADOR == 1 ~ "Daniel Scioli",
+    PERCEPCION_DE_GANADOR == 2 ~ "Mauricio Macri",
+    PERCEPCION_DE_GANADOR == 3 ~ "Sergio Massa",
+    PERCEPCION_DE_GANADOR == 4 ~ "Otro",
+    PERCEPCION_DE_GANADOR == 9 ~ "No sabe"
+  ),
+  INFLUENCIA_DE_CRISTINA_EN_SCIOLI = factor(INFLUENCIA_DE_CRISTINA_EN_SCIOLI,
+                                            levels = c(1:4,9),
+                                            labels = c("Ninguna","Poca","Bastante","Mucha","No sabe"),
+                                            ordered = T),
+  POSICIONAMIENTO_ESPACIAL = factor(POSICIONAMIENTO_ESPACIAL,
+                                    levels = c(1:5,9),
+                                    labels = c("Totalmente de izquierda",
+                                               "Más izquierda que derecha",
+                                               "Ni de izquierda ni de derecha",
+                                               "Más de derecha que de izquierda",
+                                               "Totalmente de derecha",
+                                               "No sabe"),
+                                           ordered = T),
+  POSICIONAMIENTO_RESPECTO_PERONISMO = factor(POSICIONAMIENTO_RESPECTO_PERONISMO,
+                                              levels = c(1:3,9),
+                                              labels = c("Peronista","Antiperonista","Ni peronista ni anti peronista","No sabe"),
+                                                     ordered = T),
+  POSICIONAMIENTO_RESPECTO_KIRCHNERISMO = factor(POSICIONAMIENTO_RESPECTO_KIRCHNERISMO,
+                                                 levels = c(1:3,9),
+                                                 labels = c("Kirchnerista","Anti kirchnerista","Ni kirchnerista ni anti kirchnerista","No sabe"),
+                                                        ordered = T),
+  VOTACION_PASO = case_when(
+    VOTACION_PASO == 0 ~ "No Sabe",
+    VOTACION_PASO == 1 ~ "Daniel Scioli",
+    VOTACION_PASO == 2 ~ "Sergio Massa",
+    VOTACION_PASO == 3 ~ "Mauricio Macri",
+    VOTACION_PASO == 4 ~ "José Manuel De La Sota",
+    VOTACION_PASO == 5 ~ "Margarita Stolbizer",
+    VOTACION_PASO == 6 ~ "Rodriguez Saa",
+    VOTACION_PASO == 8 ~ "Otros",
+    VOTACION_PASO == 9 ~ "Blanco / No voto"),
+  NE_CBA = factor(NE_CBA,
+                  levels = c(1:3),
+                  labels = c("P. Completa","Sec. Comp-Terc. Inc","Terc/Univ. Completo"), 
+                  ordered = T)
+  )|>
+  clean_names()
+
+
+
+GBA <- GBA |> 
+  mutate(UA = as.numeric(UA),
+  EDAD = factor(EDAD,
+                levels = c(1:4), 
+                labels = c("18-29","30-49","50-65",">65"),
+                ordered = T),
+   SEXO = factor(SEXO,
+                levels = c(1:2),
+                labels = c("Varón","Mujer"),
+                ordered = T),
+  NIV_EDUCATIVO = factor( NIV_EDUCATIVO,
+                          levels = (1:5),
+                          labels = c("Primario completo",
+                                     "Secundario incompleto o completo",
+                                     "Terciario no univ. incompleto",
+                                     "Terciario no univ. completo",
+                                     "Universitario incompleto o completo"),
+                          ordered = T),
+  VOTO_CANDIDATO = case_when(
+    VOTO_CANDIDATO == 1 ~ "Daniel Scioli",
+    VOTO_CANDIDATO == 2 ~ "Mauricio Macri",
+    VOTO_CANDIDATO == 3 ~ "Sergio Massa",
+    VOTO_CANDIDATO == 4 ~ "Margarita Stolbizer",
+    VOTO_CANDIDATO == 5 ~ "Nicolas Del Caño",
+    VOTO_CANDIDATO == 6 ~ "Adolfo Rodriguez Saa",
+    VOTO_CANDIDATO == 8 ~ "Ninguno / En Blanco",
+    VOTO_CANDIDATO == 9 ~ "No Sabe"),
+  VOTO_ACOTADO = case_when(
+    VOTO_ACOTADO == 1 ~ "Daniel Scioli",
+    VOTO_ACOTADO == 2 ~ "Mauricio Macri",
+    VOTO_ACOTADO == 3 ~ "Sergio Massa",
+    VOTO_ACOTADO == 8 ~ "Ninguno / En Blanco",
+    VOTO_ACOTADO == 9 ~ "No Sabe"),
+  JAMAS_VOTARIA = case_when(
+    JAMAS_VOTARIA == 1 ~ "Daniel Scioli",
+    JAMAS_VOTARIA == 2 ~ "Mauricio Macri",
+    JAMAS_VOTARIA == 3 ~ "Sergio Massa",
+    JAMAS_VOTARIA == 8 ~ "Ninguno / En Blanco",
+    JAMAS_VOTARIA == 9 ~ "No Sabe"),
+  GESTION_CRISTINA = factor(GESTION_CRISTINA,
+                            levels = c(1,2,9),
+                            labels = c("Desaprueba","Aprueba","No sabe"),
+                            ordered = T),
+  ECONOMIA_PAIS_2_AÑOS = factor(ECONOMIA_PAIS_2_AÑOS,
+                                levels = c(1:3,9),
+                                labels = c("Mejoró","Empeoró","Se mantuvo igual","No sabe"),
+                                ordered = T),
+  ECONOMIA_FLIAR_2_AÑOS = factor(ECONOMIA_FLIAR_2_AÑOS,
+                                levels = c(1:3,9),
+                                labels = c("Mejoró","Empeoró","Se mantuvo igual","No sabe"),
+                                ordered = T),
+  CONTINUIDAD_O_CAMBIO = factor(CONTINUIDAD_O_CAMBIO,
+                                levels = c(1:3,9),
+                                labels = c("Mantener políticas actuales","Mantener algunas y cambiar otras","Cambiar todas","No sabe"),
+                                ordered = T),
+  REPRESENTACION_DEL_CAMBIO = case_when(
+    REPRESENTACION_DEL_CAMBIO == 1 ~ "Sergio Massa",
+    REPRESENTACION_DEL_CAMBIO == 2 ~ "Mauricio Macri",
+    REPRESENTACION_DEL_CAMBIO == 3 ~ "Daniel Scioli",
+    REPRESENTACION_DEL_CAMBIO == 8 ~ "Ninguno",
+    REPRESENTACION_DEL_CAMBIO == 9 ~ "No sabe"),
+  AGENDA_DE_TEMAS = case_when(
+    AGENDA_DE_TEMAS == 1 ~ "Seguridad",
+    AGENDA_DE_TEMAS == 2 ~ "Economía",
+    AGENDA_DE_TEMAS == 3 ~ "Respeto de instituciones",
+    AGENDA_DE_TEMAS == 4 ~ "Educacion, asistencia social, salud",
+    AGENDA_DE_TEMAS == 5 ~ "Empleo",
+    AGENDA_DE_TEMAS == 9 ~ "No sabe"
+  ),
+  PERCEPCION_DE_GANADOR = case_when(
+    PERCEPCION_DE_GANADOR == 1 ~ "Daniel Scioli",
+    PERCEPCION_DE_GANADOR == 2 ~ "Mauricio Macri",
+    PERCEPCION_DE_GANADOR == 3 ~ "Sergio Massa",
+    PERCEPCION_DE_GANADOR == 4 ~ "Otro",
+    PERCEPCION_DE_GANADOR == 9 ~ "No sabe"
+  ),
+  INFLUENCIA_DE_CRISTINA_EN_SCIOLI = factor(INFLUENCIA_DE_CRISTINA_EN_SCIOLI,
+                                            levels = c(1:4,9),
+                                            labels = c("Ninguna","Poca","Bastante","Mucha","No sabe"),
+                                            ordered = T),
+  POSICIONAMIENTO_ESPACIAL = factor(POSICIONAMIENTO_ESPACIAL,
+                                    levels = c(1:5,9),
+                                    labels = c("Totalmente de izquierda",
+                                               "Más izquierda que derecha",
+                                               "Ni de izquierda ni de derecha",
+                                               "Más de derecha que de izquierda",
+                                               "Totalmente de derecha",
+                                               "No sabe"),
+                                           ordered = T),
+  POSICIONAMIENTO_RESPECTO_PERONISMO = factor(POSICIONAMIENTO_RESPECTO_PERONISMO,
+                                              levels = c(1:3,9),
+                                              labels = c("Peronista","Antiperonista","Ni peronista ni anti peronista","No sabe"),
+                                                     ordered = T),
+  POSICIONAMIENTO_RESPECTO_KIRCHNERISMO = factor(POSICIONAMIENTO_RESPECTO_KIRCHNERISMO,
+                                                 levels = c(1:3,9),
+                                                 labels = c("Kirchnerista","Anti kirchnerista","Ni kirchnerista ni anti kirchnerista","No sabe"),
+                                                        ordered = T),
+  VOTACION_PASO = case_when(
+    VOTO_PASO == 0 ~ "No Sabe",
+    VOTO_PASO == 1 ~ "Daniel Scioli",
+    VOTO_PASO == 2 ~ "Sergio Massa",
+    VOTO_PASO == 3 ~ "Mauricio Macri",
+    VOTO_PASO == 4 ~ "José Manuel De La Sota",
+    VOTO_PASO == 5 ~ "Margarita Stolbizer",
+    VOTO_PASO == 6 ~ "Rodriguez Saa",
+    VOTO_PASO == 8 ~ "Otros",
+    VOTO_PASO == 9 ~ "Blanco / No voto"),
+  NE_BSAS = factor(NE_BSAS,
+                  levels = c(1:3),
+                  labels = c("P. Completa","Sec. Comp-Terc. Inc","Terc/Univ. Completo"),
+                  ordered = T))|>
+  clean_names() |> 
+  select(-voto_paso)
+```
+
+# Análisis Exploratorio
+
+## Resumen de los Datos {.tabset}
+
+En este apartado se realizará la manipulación y transformación de datos como así también el análisis exploratorio de ambas bases
+
+### **Buenos Aires**
+
+En una primera apreciación de la base de **Buenos Aires** se puede observar que existen valores nulos. Estos pueden deberse a respuestas faltantes o preguntas que los encuestados optaron por no responder.
+
+```{r}
+skimr::skim(GBA) 
+
+```
+
+### **Córdoba**
+
+Al igual que con el df de Buenos Aires, vemos que en el dataframe de **Córdoba** existen valores nulos.
+
+```{r}
+skimr::skim(CORDOBA) 
+```
+
+##  {.tabset}
+
+### Tratamiento de los valores nulos
+
+Para el tratamiento de los mismos se utilizará el paquete {mice} *Multiple Imputation by Chained Equations*. Este método imputa los datos faltantes a través de una serie iterativa de modelos predictivos
+
+### **Buenos Aires**
+
+En este subpanel se buscará realizar el tratamiento de los valores nulos de la base de **Buenos Aires**
+
+```{r}
+GBA %>% visdat::vis_dat(warn_large_data = F)
+naniar::gg_miss_var(GBA, show_pct = T)
+naniar::gg_miss_upset(GBA,nsets = 10)
+```
+
+Como se puede ver en los gráficos anteriores, la variable que más posee valores nulos es `influencia_de_cristina_en_scioli`. Esta variable no se encuentra relacionada directamente con otras. Por lo que no se debe a un salto por no completar alguna pregunta de la encuesta.
+
+```{r results='hide'}
+
+# Convierto las variables a factor
+df_bsas <- GBA  |> 
+  mutate_all(as.factor) |> 
+  mutate(ua = as.numeric(ua))
+
+mice_object <- mice(df_bsas, method = "polyreg")
+summary(mice_object)
+df_gba_sin_NA <- complete(mice_object)
+```
+
+Mostramos el resultado de la imputación
+
+```{r}
+visdat::vis_miss(df_gba_sin_NA)
+
+```
+
+Como se puede ver en el gráfico ya no hay valores nulos. Los mismos fueron imputados satisfactoriamente por `mice` .
+
+### **Córdoba**
+
+En este subpanel se buscará realizar el tratamiento de los valores nulos de la base de **Córdoba**
+
+```{r}
+CORDOBA %>% visdat::vis_dat(warn_large_data = F)
+naniar::gg_miss_var(CORDOBA, show_pct = T)
+naniar::gg_miss_upset(CORDOBA,nsets = 10)
+```
+
+A diferencia del dataset de Buenos Aires, se observa menos cantidad de valores nulos. Se procederá a imputar los mismos:
+
+```{r results='hide'}
+# Convierto las variables a factor
+df_cordoba <- CORDOBA  |> 
+  mutate_all(as.factor) |> 
+  mutate(ua = as.numeric(ua))
+
+mice_object <- mice(df_cordoba, method = "polyreg")
+summary(mice_object)
+df_cordoba_sin_NA <- complete(mice_object)
+```
+
+Mostramos el resultado de la imputación:
+
+```{r}
+visdat::vis_miss(df_cordoba_sin_NA)
+```
+
+## Explorando los datos
+
+### **Buenos Aires**
+
+A continuación se analizará el dataset de **Buenos Aires.**El paquete {Hmisc} permite una buena visualización de la distribución de las variables categóricas. Algunas observaciones:
+
+```{r}
+# analizamos los datos 
+resumen_gba <- Hmisc::describe(df_gba_sin_NA, transpose = FALSE,tabular = FALSE)
+
+
+resumen_gba
+```
+
+La mayoría de los encuestados (45%) se encuentra en el rango de `edad` de 50-65 años. El 52% según la variable `sexo` es mujer. Respecto al nivel educativo (`niv_educativo`) el 37.3% posee secundario, el 29% terciario completo, el 21% primario completo, el 17.2% Terciario incompleto. Y, por último, el 16.4% posee Universitario completo o incompleto.
+
+Sobre el `voto_candidato` el 38.6% tiene intenciones de votar a Daniel Scioli, el 29.8% a Mauricio Macri y, el 21.4% a Sergio Massa. En esta misma linea, se obsevan los resultados de `voto_acotado` . En `jamas_votaria` rankea Daniel Scioli con un 44.2%.
+
+El 51.5% desaprueba la `gestion_cristina`, para el 47.5% la economía en estos ultimos dos años empeoró (`economia_pais_2_anos`), el 36.2% considera que su economía familiar empeoro (`economia_fliar_2_anos`). Sin embargo, para el 53.6% se debería mantener algunas políticas y cambiar otras y el 24% piensa que habría que mantener todas las políticas (`continuidad_o_cambio`). Sobre este punto, el 34% sostiene que la representación del cambio (`representacion_del_cambio`) está en manos de Mauricio Macri y el 31.4 de Daniel Scioli
+
+Entre la agenda de temas más mencionados se encuentra: Educación, Asistencia Social, Salud y Empleo (`agenda_de_temas`). El 46.4% cree que ganará Daniel Scioli (`percepcion_de_ganador`) y el 25.5% Mauricio Macri. En este sentido, el 52.5% considera que hay influencia de CFK sobre Daniel Scioli (`influencia_de_cristina_en_scioli`)
+
+En relación con el posicionamiento de los encuestados: El 60% no se considera ni de izquierda ni de derecha (`posicionamiento_espacial`) y el 56% no se define ni como peronista ni antiperonista (`posicionamiento_respecto_peronismo`). Lo mismo sucede con el posicionamiento respecto al kirchnerismo, el 40.5% no se considera K ni antiK, el 29% es antiK y el 26.8% es K
+
+Sobre qué votaron en las PASO, el 35.7% votó a Daniel Scioli y el 21.2% a Mauricio Macri
+
+```{r}
+df_categoricas <- df_gba_sin_NA %>%
+  select_if(is.factor)
+
+# Creo una lista
+lista_graficos <- list()
+
+# Armo un loop para graficar todos
+for (col in names(df_categoricas)) {
+  # Calculamos la frecuencia de cada
+  frecuencias <- df_gba_sin_NA %>%
+    count(!!sym(col), voto_acotado ) %>%
+    group_by(voto_acotado) %>%
+    mutate(porcentaje = n / sum(n) * 100)
+  
+  
+  # Graficamos
+  grafico_barras_apilados <- ggplot(frecuencias, aes(x = reorder(!!sym(col), -porcentaje), y = porcentaje, fill = as.factor(voto_acotado))) +
+    geom_bar(position = 'dodge',stat = "identity") +
+    labs(title = NULL, x = col, y = " ", fill = "Voto Acotado") +
+    guides(fill = guide_legend(title = " ")) +
+    scale_fill_brewer(palette = "Set3") +# 
+    theme_minimal() +
+    theme(axis.text.x = element_text(hjust = 1, size = 5, angle = 45),
+          axis.text.x.top = element_text(hjust = 1, size = 5,angle = 45),
+          axis.text.y = element_text(size = 5),
+          legend.position = 'top',
+          legend.text = element_text(size = 4),
+          legend.key.size = unit(0.4, 'cm'), # es para los cuadraditos
+          legend.key.width = unit(0.4, 'cm')
+          ) +
+    scale_x_discrete(labels = function(x) str_wrap(x, width = 10))  
+  
+  # Guardo los gráficos en la lista
+  lista_graficos[[col]] <- grafico_barras_apilados
+}
+
+# Armamos varias grillas para que no se apelmace
+num_grillas <- ceiling(length(lista_graficos) / 6)
+grillas <- lapply(1:num_grillas, function(i) {
+  inicio <- (i - 1) * 6 + 1
+  fin <- min(i * 6, length(lista_graficos))
+  grid.arrange(grobs = lista_graficos[inicio:fin], ncol = 2)
+})
+
+```
+
+En este gráfico se muestra por variable la distribución del `voto_acotado` . En relación con las **variables sociodemográficas** podemos decir que dentro del rango de edad 50-65 el "No sabe" lidera las respuestas, en segundo lugar Mauricio Macri y tercero Daniel Scioli. Entre los 18-29 años el voto en blanco o ninguno tiene mayor proporcion. Daniel Scioli tiene mayor proporción de Voto Femenino, y Sergio Massa masculino. Y, Sergio Massa lidera entre los que poseen secundario completo o incompleto y universitario y terciario está parejo entre Macri y Scioli
+
+Respecto a las variables económicas: Quienes desaprueban la gestión cristina en mayor medida votarán a Mauricio Macri y, entre quienes la aprueban votarána a Daniel Scioli (`gestion_cristina`). En el mismo sentido, quienes consideran que su situación económica empeoró (`economia_pais_2_anos` y `economia_fliar_2_anos`) votarán a la oposición y, a la inversa, al oficialismo
+
+### **Córdoba**
+
+A continuación se analizará el dataset de **Córdoba.**
+
+```{r}
+resumen_cba <- Hmisc::describe(df_cordoba_sin_NA, transpose = FALSE,tabular = FALSE) 
+
+resumen_cba
+
+```
+
+En primer lugar, gracias a la imputación ya no hay valores nulos dentro del df. En total hay 273 observaciones. Al igual que como sucede en **Buenos Aires,** la mayoría de las personas encuestadas pertenecen se encuentran entre 30 y 65 años (`edad`) y, su `sexo` corresponde a mujer (55.9%). El nivel educativo predominante es *universitario completo o incompleto* (`niv_educativo`).
+
+En `voto_candidato` el 46.9% votaría a Mauricio Macri y el 23.4% a Daniel Scioli. Esta distribución se mantiene en `voto_acotado` . Además, el 63.4% jamás votaría a Daniel Scioli y el 24.1% a Mauricio Macri.
+
+En relación con la gestión del Gobierno de Cristina (`gestion_cristina`) 65.6% de los cordobeses encuestados la desaprueba y el 62.2% considera que la situación económica del país empeoró en los últimos dos años (`economia_pais_2_anos`). No obstante, si bien el 44% de los encuestados cree que su situación económica familiar empeoró, el 30% considera que no hubo cambio (`economia_fliar_2_anos`)
+
+Al respecto de la continuidad de las políticas de gobierno para el 56.2% se debería mantener algunos y modificar otras (`continuidad_o_cambio`). En esta línea, para el 47.2% la imagen del cambio es Mauricio Macri (`representacion_del_cambio`). Los temas mas importantes más elegidos son: Educación, Asistencia Social, Salud y Empleo (`agenda_de_temas`)
+
+Para el 37.5 % el ganador será Mauricio Macri y para el 36.6% será Daniel Scioli (`percepcion_de_ganador`). En linea, el 37.2% considera que hay influencia de CFK en Daniel Scioli (`influencia_de_cristina_en_scioli`)
+
+Sobre la posición ideológica de los encuestados:
+
+-   El 63.1% no se considera ni de izquierda ni de derecha (`posicionamiento_espacial`)
+
+-   El 64.7% no es ni peronista ni antiperonista (`posicionamiento_respecto_peronismo`)
+
+-   El 42.2% no es K ni AntiK, pero el 38.8% se considera antikirchnerista (`posicionamiento_respecto_kirchnerismo`)
+
+Por último, en las PASO el 32.5 votó a Mauricio Macri, y el 16.6% a Daniel Scioli (`votacion_paso`)
+
+```{r fig.height= 5, fig.width= 8}
+df_categoricas <- df_cordoba_sin_NA %>%
+  select_if(is.factor)
+
+# Creo una lista
+lista_graficos <- list()
+
+# Armo un loop para graficar todos
+for (col in names(df_categoricas)) {
+  # Calculamos la frecuencia de cada
+  frecuencias <- df_cordoba_sin_NA %>%
+    count(!!sym(col), voto_acotado ) %>%
+    group_by(voto_acotado) %>%
+    mutate(porcentaje = n / sum(n) * 100)
+  
+  
+  # Graficamos
+  grafico_barras_apilados <- ggplot(frecuencias, aes(x = reorder(!!sym(col), -porcentaje), y = porcentaje, fill = as.factor(voto_acotado))) +
+    geom_bar(position = 'dodge',stat = "identity") +
+    labs(title = NULL, x = col, y = " ", fill = "Voto Acotato") +
+    guides(fill = guide_legend(title = " ")) +
+    scale_fill_brewer(palette = "Set3") +# 
+    theme_minimal() +
+    theme(axis.text.x = element_text(hjust = 1, size = 5, angle = 45),
+          axis.text.x.top = element_text(hjust = 1, size = 5,angle = 45),
+          axis.text.y = element_text(size = 5),
+          legend.position = 'top',
+          legend.text = element_text(size = 4),
+          legend.key.size = unit(0.4, 'cm'), # es para los cuadraditos
+          legend.key.width = unit(0.4, 'cm')
+          ) +
+    scale_x_discrete(labels = function(x) str_wrap(x, width = 10))  
+  
+  # Guardo los gráficos en la lista
+  lista_graficos[[col]] <- grafico_barras_apilados
+}
+
+# Armamos varias grillas para que no se apelmace
+num_grillas <- ceiling(length(lista_graficos) / 6)
+grillas <- lapply(1:num_grillas, function(i) {
+  inicio <- (i - 1) * 6 + 1
+  fin <- min(i * 6, length(lista_graficos))
+  grid.arrange(grobs = lista_graficos[inicio:fin], ncol = 2)
+})
+```
+
+En este gráfico se muestra por variable la distribución del `voto_acotado` . En relación con las **variables sociodemográficas** podemos decir que: Daniel Scioli será más votado por el rango 30-49 años y Macri por 50-65, Sergio Massa tiene mayor proporción de Voto Femenino, al igual que Mauricio Macri. Y, Daniel Scioli lidera entre los universitaruis y Mauricio Macri entre los que poseen secundario completo o incompleto. Respecto a las variables económicas y de gestión, las respuestas van en línea con lo visto en **Buenos Aires**
+
+# Ponderación iterativa
+
+El **método de ponderación iterativa** consiste en ajustar los valores asignados a cada observación . De esta manera, lo que se busca es corregir el error de muestreo y hacer coincidir la muestra con las características de la población. Para ello, es necesario aumentar la influencia de las unidades subrepresentadas y disminuir la influencia de las unidades sobrerrepresentadas.
+
+Para dicha tarea se utilizará el paquete {anesrake} que permite realizar la calibración (o ajuste) de las muestras a partir de objetivos de población conocidos [Aquí se puede acceder a la fuente](https://zacharylhertz.github.io/posts/2022/05/weighting-surveys). Se trata de una función que implementa el método de calibración iterativa.
+
+El método de calibración iterativa se repite varias veces hasta que se alcanza la convergencia. En cada iteración, los pesos de la muestra se ajustan para que las proporciones de las variables calibradas se acerquen a las proporciones de la población objetivo. Luego, se utilizan estos nuevos pesos ajustados para calcular las proporciones nuevamente, y el proceso se repite hasta que las proporciones convergen a los valores deseados
+
+A diferencia de paquetes como {survey} con {anesrake} no es necesario tener un diseño de muestreo creado previamente para utilizarlo sino que puede realizarse directamente con la base de encuestas y definir los objetivos de calibración en forma de una lista.
+
+Para dicha tarea se utilizarán las variables `sexo`, `edad` y `niv_educativo` . A continuación se obtienen los valores poblacionales de la **Encuesta Permanente de Hogares - EPH** del año 2015 en función de estas variables demográficas
+
+```{r}
+
+# cargo archivos 
+
+ponderador_sexo <- read_xlsx("Consigna y materiales TP1/Materiales de referencia/Sociodemograficos.xlsx",sheet = "sexo")
+ponderador_edad <- read_xlsx("Consigna y materiales TP1/Materiales de referencia/Sociodemograficos.xlsx",sheet = "edad")
+ponderador_educa <- read_xlsx("Consigna y materiales TP1/Materiales de referencia/Sociodemograficos.xlsx",sheet = "educa")
+```
+
+## **Buenos Aires**
+
+```{r include = FALSE}
+
+# Ponderadores de sexo
+pon_sexo_baires <- ponderador_sexo  |> 
+  adorn_percentages('col')  |> 
+  select(sexo, GBA) |> 
+  mutate(prop = GBA)  |> 
+  select(sexo, prop) |> 
+  as.data.frame()  |> 
+  pull(prop) |> 
+  as.numeric() 
+
+names(pon_sexo_baires) <- c("Varón","Mujer")
+
+# Ponderador de edad
+pon_edad_baires <- ponderador_edad |> 
+  filter(edad !=18) |> 
+  mutate(edad = case_when(edad <=29 ~ 1,
+                          edad <=49 ~ 2,
+                          edad <=65 ~ 3,
+                          edad >65 ~ 4)) |>
+  mutate (edad = factor(edad,
+                levels = c(1:4), 
+                labels = c("18-29","30-49","50-65",">65"),
+                ordered = T)) |> 
+  select('edad','gba') |> 
+  group_by(edad) |> 
+  summarise(n = sum(gba)) |> 
+  mutate(prop = n/sum(n)) |> 
+  select(edad, prop)|> 
+  as.data.frame() |> 
+  pull(prop) |> 
+  as.numeric() 
+  
+names(pon_edad_baires) <- c("18-29","30-49","50-65",">65")
+
+# Nivel educativo
+pon_educ_baires <- ponderador_educa %>%
+  mutate(ne_bsas = factor(nivel_educativo,
+                         levels = c("Sin instrucción", "Primaria Incompleta (incluye educación especial)", "Primaria Completa",
+                                    "Secundaria Incompleta", "Secundaria Completa", "Superior Universitaria Incompleta",
+                                    "Superior Universitaria Completa"),
+                         labels = c("P. Completa", "P. Completa", "P. Completa", "Sec. Comp-Terc. Inc", "Sec. Comp-Terc. Inc",
+                                    "Terc/Univ. Completo", "Terc/Univ. Completo"),
+                         ordered = TRUE)) |> 
+  select(ne_bsas,gba) |> 
+  group_by(ne_bsas) |> 
+  summarise(n= sum(gba)) |> 
+  mutate(prop = n/sum(n)) |> 
+  select(!n) |> 
+  pull(prop) |> 
+  as.numeric()
+
+names(pon_educ_baires) <- c("P. Completa", "Sec. Comp-Terc. Inc", "Terc/Univ. Completo")
+
+
+```
+
+```{r}
+# listado de ponderadores
+targets_baires <- list(pon_sexo_baires,pon_edad_baires,pon_educ_baires)
+
+# nombres del df
+names(targets_baires) <- c("sexo","edad","ne_bsas")
+
+# muestro los ponderadores
+targets_baires
+
+
+base_baires <-  as.data.frame(df_gba_sin_NA)
+
+
+# creo ponderacion_eph con anesrake
+weights_baires <- anesrake(inputter = targets_baires, dataframe = base_baires, caseid = base_baires$ua, type = "nolim") 
+
+# unimos
+base_baires$ponderacion_eph  <- unlist(weights_baires[1])
+
+print(paste("la cantidad de iteraciones necesarias para realizar la ponderación de la muestra fue de", weights_baires$iterations, "iteraciones"))
+
+```
+
+La `base_baires` fue ponderada en 31 iteraciones. Observamos la distribución en función de la variable `voto_acotado`
+
+```{r}
+df_gba_summary <- base_baires %>%
+  group_by(voto_acotado) %>%
+  summarise(n = n_distinct(ua),
+            n_pond = sum(ponderacion_eph)) %>%
+  mutate(prop_n = (n / sum(n))*100,
+         prop_pond = (n_pond / sum(n_pond))*100) %>%
+  pivot_longer(cols = c(prop_n, prop_pond), names_to = "Tipo de ponderación", values_to = "Porcentaje") %>%
+  mutate(`Tipo de ponderación` = ifelse(`Tipo de ponderación` == "prop_n", "No Ponderado", "Ponderado"))
+
+# Graficamos
+
+ggplot(df_gba_summary, aes(x = voto_acotado, y = Porcentaje, fill = `Tipo de ponderación`)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Voto acotado ponderado y sin ponderar",
+       x = "Voto acotado",
+       y = "Porcentaje",
+       fill = "Tipo de muestra") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) + scale_fill_brewer(palette = "Accent") + 
+  theme_light() +
+    scale_fill_brewer(palette = "Set3")
+```
+
+## **Córdoba**
+
+Repetimos el procedimiento con el df de *Córdoba*:
+
+```{r include=FALSE}
+
+#Transformamos las variables de los ponderadores para que coincidan con la base
+# Ponderador de sexo eph
+pon_sexo_cordoba <- ponderador_sexo  |> 
+  adorn_percentages('col')  |> 
+  select(sexo, cba) |> 
+  mutate(prop = cba)  |> 
+  select(sexo, prop) |> 
+  as.data.frame()  |> 
+  pull(prop) |> 
+  as.numeric() 
+
+names(pon_sexo_cordoba) <- c("Varón","Mujer")
+
+# ponderador de edad
+pon_edad_cordoba <- ponderador_edad |> 
+  filter(edad !=18) |> 
+  mutate(edad = case_when(edad <=29 ~ 1,
+                          edad <=49 ~ 2,
+                          edad <=65 ~ 3,
+                          edad >65 ~ 4)) |>
+  mutate (edad = factor(edad,
+                levels = c(1:4), 
+                labels = c("18-29","30-49","50-65",">65"),
+                ordered = T)) |> 
+  select('edad','cba') |> 
+  group_by(edad) |> 
+  summarise(n = sum(cba)) |> 
+  mutate(prop = n/sum(n)) |> 
+  select(edad, prop)|> 
+  as.data.frame() |> 
+  pull(prop) |> 
+  as.numeric() 
+  
+names(pon_edad_cordoba) <- c("18-29","30-49","50-65",">65")
+
+# ponderador del nivel educativo
+pon_educ_cordoba <- ponderador_educa %>%
+  mutate(ne_cba = factor(nivel_educativo,
+                         levels = c("Sin instrucción", "Primaria Incompleta (incluye educación especial)", "Primaria Completa",
+                                    "Secundaria Incompleta", "Secundaria Completa", "Superior Universitaria Incompleta",
+                                    "Superior Universitaria Completa"),
+                         labels = c("P. Completa", "P. Completa", "P. Completa", "Sec. Comp-Terc. Inc", "Sec. Comp-Terc. Inc",
+                                    "Terc/Univ. Completo", "Terc/Univ. Completo"),
+                         ordered = TRUE)) |> 
+  select(ne_cba,cba) |> 
+  group_by(ne_cba) |> 
+  summarise(n= sum(cba)) |> 
+  mutate(prop = n/sum(n)) |> 
+  select(!n) |> 
+  pull(prop) |> 
+  as.numeric()
+
+
+names(pon_educ_cordoba) <- c("P. Completa", "Sec. Comp-Terc. Inc", "Terc/Univ. Completo")
+
+
+```
+
+```{r}
+# creo la lista de ponderadores
+targets_cordoba <- list(pon_sexo_cordoba,pon_edad_cordoba,pon_educ_cordoba)
+
+# pongo los mismos nombres de las variables del df
+names(targets_cordoba) <- c("sexo","edad","ne_cba")
+
+# los ponderadores para iterar
+targets_cordoba
+
+base_cordoba <-  as.data.frame(df_cordoba_sin_NA)
+
+# creo ponderacion_eph con anesrake
+weights_cordoba <- anesrake(inputter = targets_cordoba, dataframe = base_cordoba, caseid = base_cordoba$ua, type = "nolim") 
+
+print(paste("la cantidad de iteraciones necesarias para realizar la ponderación de la muestra fue de", weights_cordoba$iterations, "iteraciones"))
+# unimos
+base_cordoba$ponderacion_eph  <- unlist(weights_cordoba[1])
+```
+
+Vemos que se necesitaron 23 iteraciones para ponderar nuestra muestra. A continuación se muestra la nueva distribución población en función de la variable `voto_acotado`
+
+```{r}
+df_cba_summary <- base_cordoba %>%
+  group_by(voto_acotado) %>%
+  summarise(n = n_distinct(ua),
+            n_pond = sum(ponderacion_eph)) %>%
+  mutate(prop_n = (n / sum(n))*100,
+         prop_pond = (n_pond / sum(n_pond))*100) %>%
+  pivot_longer(cols = c(prop_n, prop_pond), names_to = "Tipo de ponderación", values_to = "Porcentaje") %>%
+  mutate(`Tipo de ponderación` = ifelse(`Tipo de ponderación` == "prop_n", "No Ponderado", "Ponderado"))
+
+# Graficamos
+ggplot(df_cba_summary, aes(x = voto_acotado, y = Porcentaje, fill = `Tipo de ponderación`)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Comparación entre el Voto Acotado ponderado y sin ponderar",
+       x = "Voto acotado",
+       y = "Porcentaje",
+       fill = "Tipo de muestra") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  theme_minimal() +
+    scale_fill_brewer(palette = "Set3")
+
+
+```
+
+```{r include = FALSE}
+# Eliminamos lo que ya no usamos
+rm(CORDOBA, GBA, df_bsas, df_cordoba, mice_object, df_categoricas,df_cba_summary, frecuencias, grafico_barras_apilados, grillas, lista_graficos, resumen_cba, targets_cordoba, weights_cordoba,df_cordoba_sin_NA, pon_edad_cordoba, pon_sexo_cordoba, pon_educ_cordoba, resumen_gba, df_gba_sin_NA, ponderador_edad,ponderador_educa, ponderador_sexo,targets_baires, weights_cordoba, pon_edad_baires, pon_sexo_baires, pon_educ_baires,num_grillas,col, weights_baires, df_gba_summary)
+```
+
+# Potencial Electoral
+
+En este apartado se buscará evaluar el potencial electoral de los principales candidatos a Presidente (Macri y Scioli) mediante la técnica de **pisos** y **techos**.
+
+## Cálculo del voto Potencial
+
+Se entiende por **voto potencial** a la estimación del porcentaje máximo de votos que un candidato podría obtener en una elección. Para calcular el voto potencial, se consideran tres grupos de votantes:
+
+-   **Votantes Seguros**: Son aquellos que ya han manifestado su intención de votar por un candidato específico y no cambiarán su elección. Para calcular esto se utilizarán las variables `voto_acotado` y `voto_cantidato`
+
+-   **Votantes Indecisos**: Son aquellos que aún no han decidido por quién votar y están considerando diferentes opciones.
+
+-   **Votantes que No Votarían**: Son aquellos que han manifestado que no votarían por un candidato específico bajo ninguna circunstancia. Para ello, se utilizará la variable `jamas_votaría`
+
+El voto potencial se calcula restando el porcentaje de votantes que no votarían del 100% y luego restando el porcentaje de votantes seguros. Es decir:
+
+|                                                                                                 |
+|-------------------------------------------------------------------------------------------------|
+| **Voto Potencial = 100% - Porcentaje de Votantes No Votarían - Porcentaje de Votantes Seguros** |
+
+El resultado es el porcentaje máximo de votos que un candidato podría obtener si lograra atraer a todos los votantes indecisos. .
+
+### **Buenos Aires**
+
+En primer lugar, se crea la variable `voto_final` imputando los valores de `voto_acotado` para aquellos casos en donde el encuestado *No sabe*
+
+```{r}
+#unique(base_baires$voto_candidato)
+df_potencial_ba <- base_baires |> 
+  mutate(voto_final = ifelse(voto_candidato == "No Sabe", voto_acotado, voto_candidato),
+         voto_final = case_when(
+           voto_final == 1 ~ "Daniel Scioli",
+           voto_final == 2 ~ "Mauricio Macri",
+           voto_final == 3 ~ "Sergio Massa",
+           voto_final == 4 ~ "Margarita Stolbizer",
+           voto_final == 5 ~ "Nicolas Del Caño",
+           voto_final == 6 ~ "Adolfo Rodriguez Saa",
+           voto_final == 8 ~ "Ninguno / En Blanco",
+           voto_final == 9 ~ "No Sabe"))
+
+# Calculamos la intención de voto
+
+#piso
+df_baires_intencion <- df_potencial_ba %>%
+  group_by(voto_final) %>%
+  summarise(tot = sum(ponderacion_eph)) |>
+  mutate(porcentaje_votaria = (tot/sum(df_potencial_ba$ponderacion_eph))*100) %>%
+  arrange(desc(porcentaje_votaria)) |> 
+  rename("candidato" = voto_final) |> 
+  select(-tot)
+
+
+#techo
+df_baires_techo <- df_potencial_ba %>%
+  group_by(jamas_votaria) %>%
+  summarise(tot = sum(ponderacion_eph)) |>
+  mutate(porcentaje_nunca_votaria = (tot/sum(df_potencial_ba$ponderacion_eph))*100) |> 
+  rename("candidato" = jamas_votaria)|> 
+  select(-tot)
+
+
+#unimos
+df_pe_gba <- left_join(df_baires_techo, df_baires_intencion, by = "candidato")
+
+#potencial
+
+df_pe_gba <-df_pe_gba |> 
+  mutate(porcentaje_potencial = 100-(porcentaje_votaria+porcentaje_nunca_votaria))
+
+# Filtramos por los candidatos solicitados
+df_pe_gba <- df_pe_gba %>%
+  filter(candidato %in% c("Daniel Scioli", "Mauricio Macri"))
+
+# Seleccionar columnas relevantes para el gráfico
+cols <- c("porcentaje_votaria", "porcentaje_potencial", "porcentaje_nunca_votaria")
+
+# Graficamos 
+df_pe_gba |> 
+  pivot_longer(cols, names_to = "tipo_voto",values_to = "prop") |> ggplot() +
+ aes(x = candidato, y = prop, fill = tipo_voto,label = paste0(round(prop, 1), "%")) +
+ geom_col() +
+ scale_fill_manual(values = c(porcentaje_nunca_votaria = "#9E0142", 
+porcentaje_potencial = "#81CBA6", porcentaje_votaria = "#5E4FA2")) +
+ labs(x = " ", y = " ", title = "Potencial electoral Buenos Aires", 
+ subtitle = "Mauricio Macri y Daniel Scioli - 2015", fill = "Tipo de voto") +
+ coord_flip() +
+ theme_light() +
+ theme(legend.position = "top", plot.title = element_text(size = 15L, hjust = 0.5), plot.subtitle = element_text(size = 13L, 
+ face = "bold", hjust = 0.5)) +
+  geom_text(position = position_stack(vjust = 0.5), size = 4, color = "black") 
+```
+
+### **Córdoba**
+
+```{r}
+#unique(base_baires$voto_candidato)
+df_potencial_cba <- base_cordoba |> 
+  mutate(voto_final = ifelse(voto_candidato == "No Sabe", voto_acotado, voto_candidato),
+         voto_final = case_when(
+           voto_final == 1 ~ "Daniel Scioli",
+           voto_final == 2 ~ "Mauricio Macri",
+           voto_final == 3 ~ "Sergio Massa",
+           voto_final == 4 ~ "Margarita Stolbizer",
+           voto_final == 5 ~ "Nicolas Del Caño",
+           voto_final == 6 ~ "Adolfo Rodriguez Saa",
+           voto_final == 8 ~ "Ninguno / En Blanco",
+           voto_final == 9 ~ "No Sabe"))
+
+# Calculamos la intención de voto
+
+#piso
+df_cordoba_intencion <- df_potencial_cba %>%
+  group_by(voto_final) %>%
+  summarise(tot = sum(ponderacion_eph)) |>
+  mutate(porcentaje_votaria = (tot/sum(df_potencial_cba$ponderacion_eph))*100) %>%
+  arrange(desc(porcentaje_votaria)) |> 
+  rename("candidato" = voto_final) |> 
+  select(-tot)
+
+
+#techo
+df_cordoba_techo <- df_potencial_cba %>%
+  group_by(jamas_votaria) %>%
+  summarise(tot = sum(ponderacion_eph)) |>
+  mutate(porcentaje_nunca_votaria = (tot/sum(df_potencial_ba$ponderacion_eph))*100) |> 
+  rename("candidato" = jamas_votaria)|> 
+  select(-tot)
+
+
+#unimos
+df_pe_cba <- left_join(df_cordoba_techo, df_cordoba_intencion, by = "candidato")
+
+#potencial
+
+df_pe_cba <-df_pe_cba |> 
+  mutate(porcentaje_potencial = 100-(porcentaje_votaria+porcentaje_nunca_votaria))
+
+# Filtramos por los candidatos solicitados
+df_pe_cba <- df_pe_cba %>%
+  filter(candidato %in% c("Daniel Scioli", "Mauricio Macri"))
+
+# Seleccionar columnas relevantes para el gráfico
+cols <- c("porcentaje_votaria", "porcentaje_potencial", "porcentaje_nunca_votaria")
+
+# Graficamos 
+df_pe_cba |> 
+  pivot_longer(cols, names_to = "tipo_voto",values_to = "prop") |> ggplot() +
+ aes(x = candidato, y = prop, fill = tipo_voto,label = paste0(round(prop, 1), "%")) +
+ geom_col() +
+ scale_fill_manual(values = c(porcentaje_nunca_votaria = "#9E0142", 
+porcentaje_potencial = "#81CBA6", porcentaje_votaria = "#5E4FA2")) +
+ labs(x = " ", y = " ", title = "Potencial electoral Córdoba", 
+ subtitle = "Mauricio Macri y Daniel Scioli - 2015", fill = "Tipo de voto") +
+ coord_flip() +
+ theme_light() +
+ theme(legend.position = "top", plot.title = element_text(size = 15L, hjust = 0.5), plot.subtitle = element_text(size = 13L, 
+ face = "bold", hjust = 0.5)) +
+  geom_text(position = position_stack(vjust = 0.5), size = 4, color = "black") 
+```
+
+## Potencial Electoral Cruzado
+
+A continuación se realiza otra forma de analizar el potencial electoral y es teniendo en cuenta los votos "*en disputa"*
+
+-   **Votaría al candidato**: Representa el porcentaje de personas que tienen la intención de votar por el candidato en cuestión.
+
+-   **En disputa**: Representa el porcentaje de personas que todavía no han decidido su voto (indecisos)
+
+-   **Jamás votaría al candidato**: Representa el porcentaje de personas que han manifestado que nunca votarían por el candidato.
+
+En este punto lo que se realiza es en los casos en donde no se vota a ninguno de los candidatos principales en `voto_final` se imputa el valor "indeciso" y, para los casos en donde en `jamás_votaría` se eligieron candidatos que no son ni *Mauricio Macri* y *Daniel Scioli* se imputa el valor "indeciso"
+
+### **Buenos Aires**
+
+```{r}
+
+df_potencial_ba_cruz <- df_potencial_ba %>%
+  filter(! voto_final == "Ninguno / En Blanco") |> 
+  mutate(voto_final = ifelse(
+    !(voto_final == "Daniel Scioli" & voto_final == "Mauricio Macri"), "Indeciso", voto_final), # indeciso: voto final no es ni MM ni DS
+    nunca_final = ifelse(jamas_votaria == "Daniel Scioli" | jamas_votaria == "Mauricio Macri",jamas_votaria, "En disputa"),
+    nunca_final = ifelse(nunca_final == 1, "Daniel Scioli", 
+                         ifelse(nunca_final == 2, "Mauricio Macri",
+                                nunca_final)))# En disputa los que no elijen a MM y DS como jamas votaria
+
+# Calculo totales
+ba_cruzado <- df_potencial_ba_cruz %>%
+  group_by(voto_final, nunca_final) %>%
+  summarise(tot = sum(ponderacion_eph)) |>
+  mutate(porcentaje_potencial = round(tot/sum(df_potencial_ba$ponderacion_eph)*100,2)) |>
+  select(-tot) |> 
+  pivot_wider(names_from = nunca_final, values_from = porcentaje_potencial)
+
+
+# mostramos
+ba_cruzado  %>%
+  kableExtra::kable(caption = "Potencial Electoral Cruzado - Mauricio Macri y Daniel Scioli (2015) - Buenos Aires") %>%
+  kableExtra::kable_styling(bootstrap_options = "responsive")
+
+```
+
+### **Córdoba**
+
+```{r}
+df_potencial_cba_cruz <- df_potencial_cba %>%
+  filter(! voto_final == "Ninguno / En Blanco") |> 
+  mutate(voto_final = ifelse(
+    voto_final != "Daniel Scioli" & voto_final != "Mauricio Macri", "Indeciso", voto_final), # indeciso: voto final no es ni MM ni DS
+    nunca_final = ifelse(jamas_votaria == "Daniel Scioli" | jamas_votaria == "Mauricio Macri",jamas_votaria, "En disputa"),
+    nunca_final = ifelse(nunca_final == 1, "Daniel Scioli", 
+                         ifelse(nunca_final == 2, "Mauricio Macri",
+                                nunca_final)))# En disputa los que no elijen a MM y DS como jamas votaria
+
+# Calculo totales
+cba_cruzado <- df_potencial_cba_cruz %>%
+  group_by(voto_final, nunca_final) %>%
+  summarise(tot = sum(ponderacion_eph)) |>
+  mutate(porcentaje_potencial = round(tot/sum(df_potencial_ba$ponderacion_eph)*100,2)) |>
+  select(-tot) |> 
+  pivot_wider(names_from = nunca_final, values_from = porcentaje_potencial)
+
+
+# mostramos
+
+cba_cruzado  %>%
+  kableExtra::kable(caption = "Potencial Electoral Cruzado - Mauricio Macri y Daniel Scioli (2015) - Córdoba") %>%
+  kableExtra::kable_styling(bootstrap_options = "responsive")
+```
+
+# Comportamiento electoral
+
+En este apartado se buscará seleccionar un conjunto de indicadores que den cuenta de dos de las perspectivas teóricas vistas en la bibliografía sobre comportamiento electoral y evaluar el impacto de dichos indicadores en la decisión de voto utilizando al menos dos herramientas de análisis comparando los resultados entre ambas ciudades
+
+Existen tres modelos dentro de la teoría del comportamiento electoral: El modelo sociológico, el modelo psico-social y, el modelo racional-económico. Para el desarrollo de este apartado se seleccionó el **modelo racional** y, el **modelo sociológico**
+
+## Modelo Racional
+
+```{r include = FALSE}
+
+# Borro lo que no voy a usar más
+rm(df_resultados, df_pe_gba, df_pe_cba, df_cordoba_intencion, df_cordoba_techo, df_baires_intencion, df_baires_techo, cba_cruzado, ba_cruzado, cols)
+```
+
+El **Modelo Racional** de comportamiento electoral se basa en la idea de que los votantes *toman decisiones electorales de manera racional y maximizan sus intereses personales y preferencias al elegir a qué candidato o partido votar*. Este enfoque se deriva de la teoría económica y se centra en la idea de que los individuos actúan como "homo economicus", es decir, como seres racionales y egoístas que buscan maximizar su bienestar personal. En el contexto electoral, el modelo racional asume que los votantes evalúan cuidadosamente las opciones políticas disponibles y toman decisiones en función de cómo creen que cada candidato o partido cumplirá con sus preferencias y necesidades. En este modelo, **el electorado responsabiliza a los actores políticos del Estado de la economía y votan en función de la evaluación que realizan al respecto**
+
+En este marco, se realizará una clusterización con kmeans de la muestra para analizar la relación de las variables económicas en el voto al **Frente para la Victoria (FPV)**. Se elige este partido con el objetivo de evaluar si, en función de las variables económicas y de gestión, el electorado elige continuar con el gobierno oficialista o prefiere cambiar, y qué variables influyen en dicha decisión. Para dicho análisis se utilizarán las variables `gestion_cristina`, `economia_pais_2_anos`, `economia_fliar_2_anos`, `continuidad_o_cambio`, `voto_acotado` y `ponderacion_eph`
+
+### **Buenos Aires**
+
+En primer lugar, se crea un df con las variables que podrían explicar el voto al Frente para la Victoria en función del modelo relacional. Se construirá una variable binaria que sea ¿Vota al Frente para la Victoria (FPV)? "Sí, No" a partir de la variable `voto_acotado`
+
+```{r}
+# Observamos las variables y su relación 
+comp_elect_bsas <- df_potencial_ba |> 
+  mutate(voto_oficialista = ifelse(voto_acotado == "Daniel Scioli" , "Si", "No")) |> 
+  select(gestion_cristina, economia_fliar_2_anos, economia_pais_2_anos, continuidad_o_cambio,voto_oficialista, ua, ponderacion_eph, voto_final)
+```
+
+Analizamos la relación entre las variables y `voto_oficialista`
+
+```{r}
+comp_elect_bsas |> 
+  group_by(voto_oficialista, gestion_cristina) |> 
+  summarise(total = sum(ponderacion_eph)) |> 
+  mutate(porcentaje = total/sum(comp_elect_bsas$ponderacion_eph),
+         porcentaje = porcentaje*100) |> 
+  ggplot() +
+ aes(x = gestion_cristina, y = porcentaje, fill = voto_oficialista) +
+ geom_col() +
+ scale_fill_manual(values = c(No = "#CE276C", Si = "#4FA292")) +
+ labs(x = " ", y = " ", title = "Valoración de la gestión de CFK según voto al Frente para la Victoria", 
+ subtitle = "Buenos Aires - Ponderado en función de la eph", fill = "¿Vota al FPV?") +
+ theme_light() +
+ theme(legend.position = "top", 
+ plot.title = element_text(size = 15L, face = "bold", hjust = 0.5), plot.subtitle = element_text(size = 12L, 
+ face = "italic", hjust = 0.5))
+```
+
+Se observa que quienes votan al FPV en `voto_acotado`, el 32% aprueba la gestión de cristina 2007-2015. Y, el 44,8% que no aprueba el desempeño en la gestión no votará al FPV
+
+```{r}
+comp_elect_bsas |> 
+  group_by(voto_oficialista, economia_fliar_2_anos) |> 
+  summarise(total = sum(ponderacion_eph)) |> 
+  mutate(porcentaje = total/sum(comp_elect_bsas$ponderacion_eph),
+         porcentaje = porcentaje*100) |> 
+  ggplot() +
+ aes(x = reorder(economia_fliar_2_anos,porcentaje), y = porcentaje, fill = voto_oficialista) +
+ geom_col() +
+ scale_fill_manual(values = c(No = "#eafd17", Si = "#fd1777")) +
+ labs(x = " ", y = " ", title = "Valoración de la economía familiar en los últimos dos \n años según voto al Frente para la Victoria", 
+ subtitle = "Buenos Aires - Ponderado en función de la eph", fill = "¿Vota al FPV?") +
+ theme_light() +
+ theme(legend.position = "top", 
+ plot.title = element_text(size = 15L, face = "bold", hjust = 0.5), plot.subtitle = element_text(size = 12L, 
+ face = "italic", hjust = 0.5))
+```
+
+En la misma linea, la mayoría de los que considera que empeoró su situación económica familiar no votará al FPV
+
+```{r}
+comp_elect_bsas |> 
+  group_by(voto_oficialista, economia_pais_2_anos) |> 
+  summarise(total = sum(ponderacion_eph)) |> 
+  mutate(porcentaje = total/sum(comp_elect_bsas$ponderacion_eph),
+         porcentaje = porcentaje*100) |> 
+  ggplot() +
+ aes(x = reorder(economia_pais_2_anos,porcentaje), y = porcentaje, fill = voto_oficialista) +
+ geom_col() +
+ scale_fill_manual(values = c(No = "#17fd9d", Si = "#9d17fd")) +
+ labs(x = " ", y = " ", 
+      title = "Valoración de la economía en los últimos dos \n años según voto al Frente para la Victoria", 
+ subtitle = "Buenos Aires - Ponderado en función de la eph", fill = "¿Vota al FPV?") +
+ theme_light() +
+ theme(legend.position = "top", 
+ plot.title = element_text(size = 15L, face = "bold", hjust = 0.5), plot.subtitle = element_text(size = 12L, 
+ face = "italic", hjust = 0.5))
+```
+
+En este caso, sucede igual que con la variable anterior, entre quienes votarán al FPV hay valoraciones más positivas de la situación económica de los últimos dos años
+
+```{r}
+comp_elect_bsas |> 
+  group_by(voto_oficialista, continuidad_o_cambio) |> 
+  summarise(total = sum(ponderacion_eph)) |> 
+  mutate(porcentaje = total/sum(comp_elect_bsas$ponderacion_eph),
+         porcentaje = porcentaje*100) |> 
+  ggplot() +
+ aes(x = reorder(continuidad_o_cambio,porcentaje), y = porcentaje, fill = voto_oficialista) +
+ geom_col() +
+ scale_fill_manual(values = c(No = "#9dfd17", Si = "#7717fd")) +
+ labs(x = " ", y = " ", 
+      title = "Valoración de la economía en los últimos dos \n años según voto al Frente para la Victoria", 
+ subtitle = "Buenos Aires - Ponderado en función de la eph", fill = "¿Vota al FPV?") +
+ theme_light() +
+ theme(legend.position = "top", 
+ plot.title = element_text(size = 15L, face = "bold", hjust = 0.5), plot.subtitle = element_text(size = 12L, 
+ face = "italic", hjust = 0.5))
+```
+
+En este gráfico vemos que los que votarían al FPV consideran que se deben mantener las políticas actuales y mantener algunas y cambiar otras a diferencia de quienes no los votarían
+
+```{r}
+#unique(df_potencial_ba$voto_final) 
+comp_elect_bsas <- df_potencial_ba |> 
+  mutate(voto_oficialista = ifelse(voto_acotado == "Daniel Scioli" , 1, 0)) 
+
+# armo df para crear dummys
+df_dummys <- df_potencial_ba |> 
+  dplyr::select(gestion_cristina, economia_fliar_2_anos, economia_pais_2_anos, continuidad_o_cambio)
+
+#Creo variables dummys
+dummy<- data.frame(sapply(df_dummys,function(x) data.frame(model.matrix(~x-1,data =df_dummys))[,-1])) |> 
+  clean_names()
+
+# uno dfs
+comp_elect_bsas <- comp_elect_bsas|> 
+  dplyr::select(ua, voto_oficialista, ponderacion_eph)|> 
+   cbind(dummy)
+
+```
+
+Cómo no es posible ponderar desde la propia función de kmeans, se replicarán las filas de la base en función de la ponderación. Además se crearon **variables dummy** con las ya mencionadas para poder realizar el análisis.
+
+```{r}
+df_cluster <- comp_elect_bsas
+
+# replicamos
+df_cluster <- df_cluster[rep(seq_len(nrow(df_cluster)), df_cluster$ponderacion_eph), ]
+
+# mostramos
+df_cluster |> 
+  head() |> 
+  kable()
+
+
+df_cluster <- df_cluster |> 
+  dplyr::select(-ponderacion_eph, -ua)
+
+# armamos el plot
+k_values <- 2:10
+wss <- numeric(length(k_values))
+
+for (k in k_values) {
+  km <- kmeans(df_cluster,centers = k, nstart = 10)
+  wss[k-1] <- sum(km$withinss)
+}
+
+# Realizo el método de Elbow para saber cuantos clusters realizar
+elbow_plot <- data.frame(K = k_values, WSS = wss) %>%
+  ggplot(aes(x = K, y = WSS)) +
+  geom_line(colour = "#440154") +
+  geom_point(colour = "#014454") +
+  labs(x = "Número de clústeres (K)", y = "Suma de cuadrados dentro del clúster (WSS)",
+       title = "Método del Codo para determinar \n el número óptimo de clústeres") +
+  theme_light() +
+  theme(
+    plot.title = element_text(size = 16L,
+    face = "bold",
+    hjust = 0.5),
+    plot.subtitle = element_text(face = "italic",
+    hjust = 0.5)
+  )
+
+elbow_plot
+```
+
+Vamos a realizar el análisis con 3 clusters
+
+```{r}
+# semilla
+set.seed(123)
+
+# realizamos el cluster
+kmeans_result <- kmeans(df_cluster, centers = 3 ) 
+
+# lo agregamos al dataset 
+df_cluster$cluster <- kmeans_result$cluster
+
+# resumen
+aggregate(. ~ cluster, data = df_cluster, FUN = mean) |> 
+  kable()
+```
+
+Queda así los encuestados divididos en tres grupos:
+
+*Un primer grupo de encuestados* al que podríamos llamar **Los Escépticos**. En este cluster solo un 3% en promedio tiene la intención de votar al FPV. En este sentido, este grupo tiene una baja proporción de aprobación de la gestión de cristina (`gestion_cristina_x_aprueba`) y una alta proporción de `gestion_cristina_x_no_sabe`. En cuanto a la percepción económica, tienen una baja proporción de `economia_fliar_2_anos_x_empeoro` y `economia_pais_2_anos_x_empeoro`, lo que sugiere que no creen que la economía familiar o la del país haya empeorado en los años previos. En términos de preferencia por la continuidad o cambio, tienen una alta proporción de `continuidad_o_cambio_x_mantener_algunas_y_cambiar_otras`. Esto indica que prefieren mantener algunas políticas y cambiar otras.
+
+*Un segundo cluster* al que denominaremos **Los Leales** con un 92% de intención de votar al Frente para la Victoria. Este grupo se caracteriza por tener una alta proporción de aprobación de la gestión del gobierno de CFK,una baja proporción de `economia_fliar_2_anos_x_empeoro` y `economia_pais_2_anos_x_empeoro` lo que sugiere que no creen que la economía familiar o la del país hayan empeorado en los últimos 2 años. En términos de preferencia por la continuidad o cambio, tienen una baja proporción de `continuidad_o_cambio_x_mantener_algunas_y_cambiar_otras` y `continuidad_o_cambio_x_cambiar_todas`, lo que indica que prefieren mantener las políticas actuales
+
+Y, por último, *Un tercer grupo* de **Los desencantados** que no votará por el FPV con una baja proporción de `gestion_cristina_x_aprueba` y `gestion_cristina_x_no_sabe`, lo que indica que desaprueban la gestión de CFK. Respecto a la percepción económica, tienen una alta proporción de `economia_fliar_2_anos_x_empeoro` y `economia_pais_2_anos_x_empeoro`, lo que sugiere que creen que la economía familiar y la del país empeoró en los últimos años. Respecto a las políticas, tienen una alta proporción de `continuidad_o_cambio_x_cambiar_todas`
+
+```{r}
+
+# Le ponemos los nombres a los clusters
+cluster_names <- c("1-Escepticos", "2-Leales", "3-Desencantados")
+
+kmeans_result$cluster <- cluster_names[kmeans_result$cluster]
+
+# Visualizamos
+fviz_cluster(kmeans_result, data = df_cluster, geom = "point") +
+  theme_light() +  theme(legend.position = "bottom") +
+  labs(title = "Resultados clustering K-means - Buenos Aires")
+
+```
+
+```{r include=FALSE}
+rm(comp_elect_bsas, df_cluster, df_dummys, df_potencial_ba_cruz, df_potencial_cba_cruz, dummy, elbow_plot, final_model, gestion_cristina,km, k, k_values, num_clusters,variable,variables_economia, wss)
+```
+
+### **Córdoba**
+
+Se realizará el mismo procedimiento que con el df de **Buenos Aires**. En primer lugar se crea un df con las variables que podrían explicar el voto al **FPV** en función del modelo racional. Se construirá una variable binaria que sea ¿Vota al Frente para la Victoria (FPV)? "Sí, No" a partir de la variable `voto_acotado`
+
+```{r}
+# Observamos las variables y su relación 
+comp_elect_cba <- df_potencial_cba |> 
+  mutate(voto_oficialista = ifelse(voto_acotado == "Daniel Scioli" , "Si", "No")) |> 
+  select(gestion_cristina, economia_fliar_2_anos, economia_pais_2_anos, continuidad_o_cambio,voto_oficialista, ua, ponderacion_eph, voto_final)
+```
+
+Analizamos la relación entre las variables y `voto_oficialista`
+
+```{r}
+comp_elect_cba |> 
+  group_by(voto_oficialista, gestion_cristina) |> 
+  summarise(total = sum(ponderacion_eph)) |> 
+  mutate(porcentaje = total/sum(comp_elect_cba$ponderacion_eph),
+         porcentaje = porcentaje*100) |> 
+  ggplot() +
+ aes(x = gestion_cristina, y = porcentaje, fill = voto_oficialista) +
+ geom_col() +
+ scale_fill_manual(values = c(No = "#CE276C", Si = "#4FA292")) +
+ labs(x = " ", y = " ", title = "Valoración de la gestión de CFK según voto al Frente para la Victoria", 
+ subtitle = "Córdoba - Ponderado en función de la eph", fill = "¿Vota al FPV?") +
+ theme_light() +
+ theme(legend.position = "top", 
+ plot.title = element_text(size = 15L, face = "bold", hjust = 0.5), plot.subtitle = element_text(size = 12L, 
+ face = "italic", hjust = 0.5))
+```
+
+Se observa que quienes votan al FPV en `voto_acotado`, el 19% aprueba la gestión de cristina 2007-2015. Y, el 59% que no aprueba el desempeño en la gestión no votará al FPV
+
+```{r}
+comp_elect_cba |> 
+  group_by(voto_oficialista, economia_fliar_2_anos) |> 
+  summarise(total = sum(ponderacion_eph)) |> 
+  mutate(porcentaje = total/sum(comp_elect_cba$ponderacion_eph),
+         porcentaje = porcentaje*100) |> 
+  ggplot() +
+ aes(x = reorder(economia_fliar_2_anos,porcentaje), y = porcentaje, fill = voto_oficialista) +
+ geom_col() +
+ scale_fill_manual(values = c(No = "#eafd17", Si = "#fd1777")) +
+ labs(x = " ", y = " ", title = "Valoración de la economía familiar en los últimos dos \n años según voto al Frente para la Victoria", 
+ subtitle = "Córdoba - Ponderado en función de la eph", fill = "¿Vota al FPV?") +
+ theme_light() +
+ theme(legend.position = "top", 
+ plot.title = element_text(size = 15L, face = "bold", hjust = 0.5), plot.subtitle = element_text(size = 12L, 
+ face = "italic", hjust = 0.5))
+```
+
+En este item, hay una alta proporción que considera que su situación económica familiar empeoró 43% y no votará al oficialismo
+
+```{r}
+comp_elect_cba |> 
+  group_by(voto_oficialista, economia_pais_2_anos) |> 
+  summarise(total = sum(ponderacion_eph)) |> 
+  mutate(porcentaje = total/sum(comp_elect_cba$ponderacion_eph),
+         porcentaje = porcentaje*100) |> 
+  ggplot() +
+ aes(x = reorder(economia_pais_2_anos,porcentaje), y = porcentaje, fill = voto_oficialista) +
+ geom_col() +
+ scale_fill_manual(values = c(No = "#17fd9d", Si = "#9d17fd")) +
+ labs(x = " ", y = " ", 
+      title = "Valoración de la economía en los últimos dos \n años según voto al Frente para la Victoria", 
+ subtitle = "Córdoba- Ponderado en función de la eph", fill = "¿Vota al FPV?") +
+ theme_light() +
+ theme(legend.position = "top", 
+ plot.title = element_text(size = 15L, face = "bold", hjust = 0.5), plot.subtitle = element_text(size = 12L, 
+ face = "italic", hjust = 0.5))
+```
+
+En este caso sucede igual que con la variable anterior, entre quienes votarán al FPV hay valoraciones más positivas de la situación económica de los últimos dos años
+
+```{r}
+comp_elect_cba |> 
+  group_by(voto_oficialista, continuidad_o_cambio) |> 
+  summarise(total = sum(ponderacion_eph)) |> 
+  mutate(porcentaje = total/sum(comp_elect_cba$ponderacion_eph),
+         porcentaje = porcentaje*100) |> 
+  ggplot() +
+ aes(x = reorder(continuidad_o_cambio,porcentaje), y = porcentaje, fill = voto_oficialista) +
+ geom_col() +
+ scale_fill_manual(values = c(No = "#9dfd17", Si = "#7717fd")) +
+ labs(x = " ", y = " ", 
+      title = "Valoración de la economía en los últimos dos \n años según voto al Frente para la Victoria", 
+ subtitle = "Córdoba - Ponderado en función de la eph", fill = "¿Vota al FPV?") +
+ theme_light() +
+ theme(legend.position = "top", 
+ plot.title = element_text(size = 15L, face = "bold", hjust = 0.5), plot.subtitle = element_text(size = 12L, 
+ face = "italic", hjust = 0.5))
+```
+
+En este gráfico vemos que si bien hay un alto porcentaje entre los que no votarían al FPV que desea cambiar las políticas (24%) la mayoría prediere mantener algunas y cambiar otras.
+
+```{r}
+#unique(df_potencial_ba$voto_final) 
+comp_elect_cba <- df_potencial_cba |> 
+  mutate(voto_oficialista = ifelse(voto_acotado == "Daniel Scioli" , 1, 0)) 
+
+# armo df para crear dummys
+df_dummys <- comp_elect_cba |> 
+  dplyr::select(gestion_cristina, economia_fliar_2_anos, economia_pais_2_anos, continuidad_o_cambio)
+
+#Creo las variables dummys
+dummy<- data.frame(sapply(df_dummys,function(x) data.frame(model.matrix(~x-1,data =df_dummys))[,-1])) |> 
+  clean_names()
+
+# uno dfs
+comp_elect_cba <- comp_elect_cba|> 
+  dplyr::select(ua, voto_oficialista, ponderacion_eph)|> 
+   cbind(dummy)
+
+
+
+```
+
+Al igual que con la base de Buenos Aires, cómo no es posible ponderar desde la propia función de kmeans, se replicarán las filas de la base en función de la ponderación. Además se crearon **variables dummy** con las ya mencionadas para poder realizar el análisis.
+
+```{r}
+df_cluster <- comp_elect_cba
+
+# replicamos
+df_cluster <- df_cluster[rep(seq_len(nrow(df_cluster)), df_cluster$ponderacion_eph), ]
+
+# mostramos
+df_cluster |> 
+  head() |> 
+  kable()
+
+
+```
+
+Al igual que con el df de Buenos Aires, vemos que al replicar con el ponderador hubo una disminución en la cantidad de registros
+
+```{r}
+
+df_cluster <- df_cluster |> 
+  dplyr::select(-ponderacion_eph, -ua)
+
+# armamos el plot
+k_values <- 2:10
+wss <- numeric(length(k_values))
+
+for (k in k_values) {
+  km <- kmeans(df_cluster,centers = k, nstart = 10)
+  wss[k-1] <- sum(km$withinss)
+}
+
+# Realizo el método de Elbow para saber cuantos clusters realizar
+elbow_plot <- data.frame(K = k_values, WSS = wss) %>%
+  ggplot(aes(x = K, y = WSS)) +
+  geom_line(colour = "#440154") +
+  geom_point(colour = "#014454") +
+  labs(x = "Número de clústeres (K)", y = "Suma de cuadrados dentro del clúster (WSS)",
+       title = "Método del Codo para determinar \n el número óptimo de clústeres") +
+  theme_light() +
+  theme(
+    plot.title = element_text(size = 16L,
+    face = "bold",
+    hjust = 0.5),
+    plot.subtitle = element_text(face = "italic",
+    hjust = 0.5)
+  )
+
+elbow_plot
+```
+
+Vamos a realizar el análisis con 4 clusters
+
+```{r}
+# semilla
+set.seed(123)
+
+# realizamos el cluster
+kmeans_result <- kmeans(df_cluster, centers = 4 ) 
+
+
+# lo agregamos al dataset 
+df_cluster$cluster <- kmeans_result$cluster
+
+# resumen
+aggregate(. ~ cluster, data = df_cluster, FUN = mean) |> 
+  kable()
+```
+
+Queda así los encuestados divididos en cuatro grupos:
+
+*Cluster 1:* **Los desencantados** Este grupo tiene un bajo voto por el FPV con un valor promedio cercano a 0. El apoyo a la gestión de Cristina es muy bajo, casi nulo. La percepción de la economía familiar en los últimos dos años es mayoritariamente negativa (71%) y consideran que empeoró. También tienen una percepción ambigüa de la economía del país, con un 92% que no sabe si mejoró o empeoró. Además, un 78$ no sabe si deberian continuar o cambiar las políticas
+
+*Cluster 2*: **Los Moderados** En este grupo, el voto por el FPV es más alto, con un valor promedio de aproximadamente 0.66. Tienen una percepción mixta sobre la gestión de Cristina, con un 53% que aprueba su gestión. La percepción de la economía familiar en los últimos dos años es variada, con aproximadamente el 56% que cree que se mantuvo igual y el 31% que piensa que empeoró. Respecto a la economía del país, la mayoría (97%) cree que se mantuvo igual. La actitud hacia el cambio es menos pronunciada en este grupo.
+
+*Cluster 3*: **Los Leales** Este grupo muestra un apoyo completo al FPV, con un voto promedio cercano a 1, lo que indica un alto apoyo a este partido político. Todos en este grupo aprueban la gestión de Cristina. En cuanto a la economía, la percepción sobre la economía familiar es predominantemente positiva, con solo el 10% que cree que se encuentra igual Además, creen que la economía del país también ha mejorado en su mayoría. Mostraron una fuerte preferencia por mantener algunas políticas actuales y cambiar otras.
+
+*Cluster 4*: **Los escepticos** En este grupo, el voto por el FPV es bajo, con un valor promedio de aproximadamente 0.02. La aprobación de la gestión de Cristina es baja, con solo el 4% que aprueba. La percepción de la economía familiar en los últimos dos años es mayoritariamente negativa, con un 73% que cree que empeoró. También consideran que la economía del país empeoró en un 92%. Tienen una preferencia por cambiar algunas políticas actuales y mantener otras.
+
+```{r}
+
+# Le ponemos los nombres a los clusters
+cluster_names <- c("1-Desencantados", "2-Moderados", "3-Leales", "4-Escepticos")
+
+kmeans_result$cluster <- cluster_names[kmeans_result$cluster]
+
+# Visualizamos
+fviz_cluster(kmeans_result, data = df_cluster, geom = "point") +
+  theme_light() +  theme(legend.position = "bottom") +
+  labs(title = "Resultados clustering K-means - Córdoba")
+
+```
+
+
+```{r include = FALSE }
+rm(df_cluster, df_dummys, dummy, elbow_plot,km,kmeans_result, cluster_names, k, k_values,wss,comp_elect_cba, base_baires, base_cordoba)
+```
+
+### Conclusiones
+
+Se puede afirmar entonces que en el caso de la Provincia de Buenos Aires y Córdoba *hay una relación entre la percepción de la situación económica y el voto o no por la continuidad del gobierno oficialista*. Es decir, quienes consideran que su situación económica empeoró en lineas generales eligen votar candidatos de otros frentes y prefieren cambios en las políticas públicas elaboradas. Por otro lado, a diferencia de Buenos Aires donde hay grupos más marcados que votarían y no votarían al FPV, en el caso de córdoba existe un cuarto grupo más moderado que muestra un voto relativamente alto por el FPV y una percepción mixta sobre la gestión de Cristina.
+
+## Modelo sociológico
+
+El **Modelo Sociológico** por otro lado  se enfoca en cómo factores sociales y demográficos influyen en las decisiones de voto de los ciudadanos Esta teoría considera que los contextos sociales y las características de los votantes tienen un impacto significativo en sus preferencias políticas y en su comportamiento electoral. De esta manera, *el elector forma sus opiniones y opciones políticas en función de las posiciones y características de su grupo de pertenencia en la sociedad en general*
+
+Para analizar la intención de voto en función de la teoría de comportamiento electoral sociológica se utilizarán las variables `edad`, `sexo`,`niv_educativo`. Se llevará a cabo una **regresión logística** con el objetivo de analizar la relación entre estas variables predictoras y la variable de resultado (`voto_oficialista`) y determinar si existe una asociación significativa entre ellas.
+
+### **Buenos Aires**
+
+```{r}
+#colnames(df_potencial_ba)
+df_socio_pba <-  df_potencial_ba |> 
+  select(ua,edad,sexo,niv_educativo,ponderacion_eph, voto_acotado) |> 
+  mutate(voto_oficialista = ifelse(voto_acotado == "Daniel Scioli", "Si","No")) |> 
+  select(-voto_acotado)
+
+rownames(df_socio_pba) <- df_socio_pba$ua
+
+# Graficamos
+df_socio_pba |> 
+  group_by(voto_oficialista, edad) |>  
+  summarise(total = sum(ponderacion_eph)) |> 
+  mutate(porcentaje = total/sum(df_socio_pba$ponderacion_eph),
+         porcentaje = porcentaje*100)  %>%
+ ggplot() +
+ aes(x = edad, y = porcentaje, fill = voto_oficialista) +
+ geom_col() +
+ scale_fill_manual(values = c(No = "#66C2A5", 
+Si = "#9F13C5")) +
+ labs(x = " ", y = "%", title = "Voto al oficialismo según la edad de los encuestados", 
+ subtitle = "Buenos Aires - Ponderado con eph", fill = "¿Vota al oficialismo?") +
+ theme_light() +
+ theme(legend.position = "top", plot.title = element_text(size = 16L, face = "bold", hjust = 0.5), 
+ plot.subtitle = element_text(size = 14L, face = "italic", hjust = 0.5))
+```
+
+Entre los que votan al oficialismo el rango etario se encuentra más distribuido entre los 18 y 65 años. Por el otro lado, los votantes de la oposición se concentran entre los 30-49 en mayor medida
+
+```{r}
+df_socio_pba |> 
+  group_by(voto_oficialista, sexo) |>  
+  summarise(total = sum(ponderacion_eph)) |> 
+  mutate(porcentaje = total/sum(df_socio_pba$ponderacion_eph),
+         porcentaje = porcentaje*100) %>%
+ ggplot() +
+ aes(x = sexo, y = porcentaje, fill = voto_oficialista) +
+ geom_col() +
+ scale_fill_manual(values = c(No = "#7ec492", 
+Si = "#c47e92")) +
+ labs(x = " ", y = "%", title = "Voto al oficialismo según el sexo de los encuestados", 
+ subtitle = "Buenos Aires - Ponderado con eph", fill = "¿Vota al oficialismo?") +
+ theme_light() +
+ theme(legend.position = "top", plot.title = element_text(size = 16L, face = "bold", hjust = 0.5), 
+ plot.subtitle = element_text(size = 14L, face = "italic", hjust = 0.5))
+```
+
+Entre los votantes del FDT hay mayor proporción de mujeres. En cambio en el voto no oficialista la distribución se encuentra más pareja
+
+```{r}
+df_socio_pba |> 
+  group_by(voto_oficialista, niv_educativo) |>  
+  summarise(total = sum(ponderacion_eph)) |> 
+  mutate(porcentaje = total/sum(df_socio_pba$ponderacion_eph),
+         porcentaje = porcentaje*100) %>%
+ ggplot() +
+ aes(x = niv_educativo, y = porcentaje, fill = voto_oficialista) +
+ geom_col() +
+ scale_fill_manual(values = c(No = "#ffce1c", 
+Si = "#1cceff")) +
+ labs(x = " ", y = "%", title = "Voto al oficialismo según el nivel \n educativo de los encuestados", 
+ subtitle = "Buenos Aires - Ponderado con eph", fill = "¿Vota al oficialismo?") +
+ theme_light() +
+ theme(legend.position = "top", plot.title = element_text(size = 16L, face = "bold", hjust = 0.5), 
+ plot.subtitle = element_text(size = 14L, face = "italic", hjust = 0.5)) +
+  coord_flip()
+```
+
+El voto no oficialista se concentra mayormente entre quienes tienen primario completo y secundario. Y, el voto oficialista entre quienes tienen secundario, primario y terciario.
+
+Realizamos la **regresión logística** para analizar la relación entre las variables y el voto al oficialismo
+
+```{r}
+
+# Creo variables dummys
+
+# armo df para crear dummys
+df_dummys <- df_socio_pba |> dplyr::select(-ponderacion_eph, -ua, -voto_oficialista,-sexo)
+
+#Creating Dummy Variables
+dummy<- data.frame(sapply(df_dummys,function(x) data.frame(model.matrix(~x-1,data =df_dummys))[,-1])) |> 
+  clean_names()
+
+# uno dfs
+df_logit_ba <- df_socio_pba|> 
+  dplyr::select(ponderacion_eph, sexo, voto_oficialista)|>
+  mutate(sexo = ifelse(sexo == "Mujer", 1, 0),
+         voto_oficialista = ifelse(voto_oficialista == "Si", 1, 0)) |> 
+   cbind(dummy) 
+
+#colnames(df_logit_ba)
+
+# Modelo con todas las variables
+modelo <- glm(voto_oficialista ~ edad_x30_49 + edad_x50_65 + edad_x_65 +sexo + niv_educativo_x_secundario_incompleto_o_completo + niv_educativo_x_terciario_no_univ_incompleto + niv_educativo_x_terciario_no_univ_completo + niv_educativo_x_universitario_incompleto_o_completo + voto_oficialista , data = df_logit_ba, family = binomial, weights = ponderacion_eph)
+
+summary(modelo)
+
+```
+
+
+
+Utilizando todas las variables sociodemográficas se observa que el **nivel educativo** es estadísticamente significativo para predecir el voto al oficialismo para los niveles universitario y terciario. Es decir que, a mayor nivel educativo mayor es el voto por el FPV. El sexo, por otro lado con un p-value de 0.0186 indica que manteniendo constantes las demás variables en el modelo, las mujeres (1) tienen más probabilidades de votar por el oficialismo en comparación con los hombres. A la inversa ocurre con `edad_x30_49`
+
+A continuación, se utilizará el método STEPAIC que permite realizar el proceso de selección de variables mediante el Akaike (AIC). El AIC es una métrica que se utiliza para ocmparar diferentes modelos y seleccionar el mejor ajustado para los datos
+
+```{r}
+#Usamos stepAIC para generar el mejor modelo
+final_model <- MASS::stepAIC(modelo)
+
+ # mostramos
+summary(final_model)
+```
+
+Para este modelo la variable nivel educativo (universitario y terciario) es la que más podría predecir el voto al oficialismo junto con el rango de edad de 30-49 (a la inversa). Es decir, quienes se encuentran en ese rango de edad tienen menos probabilidad de votar al FPV
+
+```{r include = FALSE}
+rm(modelo, final_model, edad, dummy, df_socio_pba, df_logit_ba,df_dummys)
+```
+
+### **Córdoba**
+
+Repetimos el procedimiento para la base de **Córdoba**
+
+```{r}
+#colnames(df_potencial_cba)
+df_socio_cba <-  df_potencial_cba |> 
+  select(ua,edad,sexo,niv_educativo,ponderacion_eph, voto_acotado) |> 
+  mutate(voto_oficialista = ifelse(voto_acotado == "Daniel Scioli", "Si","No")) |> 
+  select(-voto_acotado)
+
+
+rownames(df_socio_cba) <- df_socio_cba$ua
+
+df_socio_cba |> 
+  group_by(voto_oficialista, edad) |>  
+  summarise(total = sum(ponderacion_eph)) |> 
+  mutate(porcentaje = total/sum(df_socio_cba$ponderacion_eph),
+         porcentaje = porcentaje*100)  %>%
+ ggplot() +
+ aes(x = edad, y = porcentaje, fill = voto_oficialista) +
+ geom_col() +
+ scale_fill_manual(values = c(No = "#66C2A5", 
+Si = "#9F13C5")) +
+ labs(x = " ", y = "%", title = "Voto al oficialismo según la edad de los encuestados", 
+ subtitle = "Córdoba - Ponderado con eph", fill = "¿Vota al oficialismo?") +
+ theme_light() +
+ theme(legend.position = "top", plot.title = element_text(size = 16L, face = "bold", hjust = 0.5), 
+ plot.subtitle = element_text(size = 14L, face = "italic", hjust = 0.5))
+```
+
+Entre los que votan al oficialismo el rango etario con mayor proporción es el de 30-49 años. Por el otro lado, los votantes de la oposición se concentran entre los 18-65 en mayor medida
+
+```{r}
+df_socio_cba |> 
+  group_by(voto_oficialista, sexo) |>  
+  summarise(total = sum(ponderacion_eph)) |> 
+  mutate(porcentaje = total/sum(df_socio_cba$ponderacion_eph),
+         porcentaje = porcentaje*100) %>%
+ ggplot() +
+ aes(x = sexo, y = porcentaje, fill = voto_oficialista) +
+ geom_col() +
+ scale_fill_manual(values = c(No = "#7ec492", 
+Si = "#c47e92")) +
+ labs(x = " ", y = "%", title = "Voto al oficialismo según el sexo de los encuestados", 
+ subtitle = "Córdoba - Ponderado con eph", fill = "¿Vota al oficialismo?") +
+ theme_light() +
+ theme(legend.position = "top", plot.title = element_text(size = 16L, face = "bold", hjust = 0.5), 
+ plot.subtitle = element_text(size = 14L, face = "italic", hjust = 0.5))
+```
+
+En ambos tipos de votantes (oficialistas y no oficialistas) hay una distribución bastante pareja entre los géneros
+
+```{r}
+df_socio_cba |> 
+  group_by(voto_oficialista, niv_educativo) |>  
+  summarise(total = sum(ponderacion_eph)) |> 
+  mutate(porcentaje = total/sum(df_socio_cba$ponderacion_eph),
+         porcentaje = porcentaje*100) |> 
+  select(-total)%>%
+ ggplot() +
+ aes(x = niv_educativo, y = porcentaje, fill = voto_oficialista) +
+ geom_col() +
+ scale_fill_manual(values = c(No = "#ffce1c", 
+Si = "#1cceff")) +
+ labs(x = " ", y = "%", title = "Voto al oficialismo según el nivel \n educativo de los encuestados", 
+ subtitle = "Córdoba - Ponderado con eph", fill = "¿Vota al oficialismo?") +
+ theme_light() +
+ theme(legend.position = "top", plot.title = element_text(size = 16L, face = "bold", hjust = 0.5), 
+ plot.subtitle = element_text(size = 14L, face = "italic", hjust = 0.5)) +
+  coord_flip()
+```
+
+El voto oficialista se concentra mayormente entre quienes tienen primario completo y universitario Y, el voto no oficialista entre quienes tienen secundario, primario y terciario.
+
+Realizamos la **regresión logística** para analizar la relación entre las variables
+
+```{r}
+
+# Creo variables dummys
+# armo df para crear dummys
+df_dummys <- df_socio_cba |> dplyr::select(-ponderacion_eph, -ua, -voto_oficialista,-sexo)
+
+# creo dummys
+dummy<- data.frame(sapply(df_dummys,function(x) data.frame(model.matrix(~x-1,data =df_dummys))[,-1])) |> 
+  clean_names()
+
+# uno dfs
+df_logit_cba <- df_socio_cba|> 
+  dplyr::select(ponderacion_eph, sexo, voto_oficialista)|>
+  mutate(sexo = ifelse(sexo == "Mujer", 1, 0),
+         voto_oficialista = ifelse(voto_oficialista == "Si", 1, 0)) |> 
+   cbind(dummy) 
+
+#colnames(df_logit_ba)
+
+
+# Modelo con todas las variables
+modelo <- glm(voto_oficialista ~ edad_x30_49 + edad_x50_65 + edad_x_65 +sexo + niv_educativo_x_secundario_incompleto_o_completo + niv_educativo_x_terciario_no_univ_incompleto + niv_educativo_x_terciario_no_univ_completo + niv_educativo_x_universitario_incompleto_o_completo + voto_oficialista , data = df_logit_cba, family = binomial, weights = ponderacion_eph)
+
+summary(modelo)
+
+```
+
+Utilizando todas las variables sociodemográficas, a diferencia del análisis en **Buenos Aires** se observa que, en este primer modelo, el *sexo* no es estadísticamente significativo para predecir el voto al oficialismo. El `niv_educativo_x_secundario_incompleto_o_completo`, por otro lado con un p-value de 0.00948 indica que manteniendo constantes las demás variables en el modelo, las personas con secundario tienen menos probabilidades de votar por el oficialismo en comparación con el resto. De la misma manera ocurre con `edad_x_65` y `edad_x50_65` .
+
+A continuación se utilizará el método STEPAIC que permite realizar el proceso de selección de variables mediante el Akaike (AIC).
+
+```{r}
+#Usamos stepAIC para generar el mejor modelo
+final_model <- MASS::stepAIC(modelo)
+
+# mostramos
+summary(final_model)
+```
+
+En línea con el modelo anterior, las variables estadísticamente significativas son: `niv_educativo_x_secundario_incompleto_o_completo` y `niv_educativo_x_terciario_no_univ_incompleto` lo que indica que a medida que aumenta el nivel educativo (hasta el nivel universitario), la probabilidad de votar al oficialismo disminuye. Respecto a la edad, a medida que aumenta la edad a partir de los 50 años es menos probable que se vote al FPV.
+
+### Conclusiones
+
+Los resultados que arrojan los modelos para *Buenos Aires* y *Córdoba* son parecidos respecto a las variables estadísticamente significativas. En este sentido, son la edad y el nivel educativo las variables que podrían explicar el voto al oficialismo. En Buenos Aires a mayor nivel educativo mayor voto al oficialismo, y el rango etario que influye inversamente es el de 30-49. En cambio, en córdoba sucede al revés, a partir de los 50 años a medida que aumenta la edad disminuye la probabilidad de votar al FPV, y lo mismo ocurre con el nivel educativo.

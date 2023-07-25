@@ -1,0 +1,28 @@
+{
+    "id": "9E9A253D",
+    "path": null,
+    "project_path": null,
+    "type": "object_explorer",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1690145355256.0,
+    "source_on_save": false,
+    "relative_order": 3,
+    "properties": {
+        "id": "090fe57b151344e6b149508e9d9416c5",
+        "name": "kmeans_result",
+        "title": "kmeans_result",
+        "language": "R",
+        "source_window_id": "",
+        "Source": "Source"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1803715591576,
+    "encoding": "",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1690145355256,
+    "read_only": false,
+    "read_only_alternatives": []
+}
